@@ -1,11 +1,9 @@
-import os
 from flask import Flask, request, abort, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-import subprocess
-import mysql.connector
+import mysettings
+from mysql import connector
 from mysql.connector import Error
-import settings
 
 load_dotenv()
 
@@ -13,51 +11,59 @@ app = Flask(__name__)
 CORS(app)
 
 """やりたいこと
-1: パラメータからユーザーを取得してチェックイン記録をDBに登録する（端末のMACアドレスで認識する）
-2-2: frontUIからアクセスされてデータを返すAPI
+入店を記録する（MACアドレスで認証、チェックイン済みなら無視）
+    チェック：今日入店しているか？
+    入店していないなら、入店処理 -> いらっしゃいませ
+    入店しているなら、貸出確認画面：品目、開始と終了を問う
+備品の貸出や防音室の利用を記録する（MACアドレスで認証、入店記録がなければ無視）
+    開始を記録する・終了を記録する：それぞれを受けるAPI
+        DBとしてはcheckinに入れる
+ユーザーを入力（ユーザー端末）
+    チェック：そのMACアドレスが存在するか確認
+    あるなら、無視
+    ないなら、パスワード入力画面
+ユーザーを登録処理
+    チェック：そのMACアドレスが存在するか確認
+    あるなら、無視
+    ないなら、customerに登録
+
+ゲストユーザーを（NFCタグによる）チェックイン等（全部操作できるようにする）
+    お古のAndroid端末のみで受け付ければいいか
+
+admin frontUI:
+    今日入店しているcustomerの一覧を選べる
+    今日のcheckinをとりあえず全部出す
+    退店を記録する
+        customerを選んだら、checkin一覧をリスト
+        その人を退店させる：max時刻と、min時刻の、差分を表示
+
+
+"""
+
+"""
+DB設計
+checkin:
+    id, customer_id, customer_name, datetime(now), type("in", "item", "room", "out" etc...), item, details
+customer:
+    id, name, type(joren, staff, admin), mac_address, bikou
 
 """
 
 
-def get_mac_address(ip_address):
-    """
-    指定されたIPアドレスに対応するMACアドレスを取得
-    """
-    try:
-        # ARPテーブルを確認する
-        output = subprocess.check_output(
-            f"arp -n {ip_address}", shell=True).decode()
-        # MACアドレスのパターンを探す
-        for line in output.splitlines():
-            if ip_address in line:
-                mac = line.split()[2]
-                return mac
-    except Exception as e:
-        print(f"エラー: {e}")
-    return None
-
-
-@app.route('/')
-def index():
-    # クライアントのIPアドレスを取得
-    client_ip = request.remote_addr
-    # MACアドレスを取得
-    mac_address = get_mac_address(client_ip)
-
-    if mac_address:
-        return f"クライアントのMACアドレス: {mac_address}"
-    else:
-        return "MACアドレスを取得できませんでした"
+@app.route('/checkin', methods=['POST'])
+def checkin():
+    mac_address = request.json.get("mac_address", "MACアドレス不明")
+    return jsonify({"message": f"受信したMACアドレス: {mac_address}"}), 200
 
 
 def fetch_users():
     try:
         # MySQLサーバーへの接続
-        connection = mysql.connector.connect(
+        connection = connector.connect(
             host='localhost',          # ホスト名
-            user=settings.DB_USER_NAME,      # ユーザー名
-            password=settings.DB_PASSWORD,  # パスワード
-            database=settings.DB_NAME   # データベース名
+            user=mysettings.DB_USER_NAME,      # ユーザー名
+            password=mysettings.DB_PASSWORD,  # パスワード
+            database=mysettings.DB_NAME   # データベース名
         )
 
         if connection.is_connected():
